@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Time Zones & IDL Dice Game</title>
+  <title>Time Zones & IDL Dice Race — Multiplayer</title>
   <style>
     :root { --bg:#0b1220; --ink:#f7f7fb; --accent:#59c; --green:#16a34a; --red:#dc2626; --panel:#121a2b; --muted:#8aa0c7; }
     *{box-sizing:border-box}
@@ -13,15 +13,15 @@
     .app{display:grid;grid-template-columns: 1.3fr 1fr; gap:16px; padding:16px;}
     @media (max-width: 980px){.app{grid-template-columns:1fr}}
     .boardWrap{background:#061023;border:1px solid #233357;border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
-    .toolbar{display:flex;gap:10px;align-items:center;padding:10px;border-bottom:1px solid #233357;background:#0d172d}
+    .toolbar{display:flex;gap:10px;align-items:center;padding:10px;border-bottom:1px solid #233357;background:#0d172d;flex-wrap:wrap}
     .btn{appearance:none;border:1px solid #2b3f6b;background:#122041;color:#fff;padding:8px 10px;border-radius:10px;font-weight:600;cursor:pointer}
     .btn:disabled{opacity:.5;cursor:not-allowed}
     .btn.primary{background:var(--accent)}
+    .pill{padding:6px 10px;border-radius:999px;border:1px solid #2b3f6b;background:#0f1d39;color:#cfe0ff;font-size:12px}
     .board{position:relative;flex:1;display:flex;align-items:center;justify-content:center;background:#0a142a}
     canvas{max-width:100%;height:auto;display:block;image-rendering:auto}
     .side{background:var(--panel);border:1px solid #233357;border-radius:14px;padding:14px}
     .row{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
-    .pill{padding:6px 10px;border-radius:999px;border:1px solid #2b3f6b;background:#0f1d39;color:#cfe0ff;font-size:12px}
     .players{display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px;}
     .card{border:1px solid #233357;border-radius:12px;padding:10px;background:#0f1a33}
     .card h3{margin:0 0 6px 0;font-size:14px}
@@ -30,25 +30,29 @@
     .die{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#fff}
     .die.green{background:var(--green)}
     .die.red{background:var(--red)}
-    .log{height:180px;overflow:auto;border:1px solid #233357;border-radius:10px;padding:8px;background:#0b152c;font-size:12px}
-    .legend{margin-top:8px;font-size:12px;color:#cbd5e1}
-    .win{color:#22c55e;font-weight:700}
+    .log{height:170px;overflow:auto;border:1px solid #233357;border-radius:10px;padding:8px;background:#0b152c;font-size:12px}
     select.select{border:1px solid #2b3f6b;background:#0f1d39;color:#cfe0ff;border-radius:10px;padding:7px 10px}
     select.select:disabled{opacity:.6}
+    .hint{font-size:12px;color:#cbd5e1}
+    .win{color:#22c55e;font-weight:700}
+    .warn{color:#fca5a5}
   </style>
 </head>
 <body>
   <header>
-    <h1>Time Zones & International Date Line — Dice Race</h1>
+    <h1>Time Zones & International Date Line — Multiplayer</h1>
   </header>
 
   <div class="app">
     <!-- BOARD -->
     <section class="boardWrap">
       <div class="toolbar">
-        <button class="btn" id="resetBtn">Reset Tokens</button>
-        <span class="pill">Using board: <b>Game Map.PNG</b></span>
+        <span class="pill" id="mmStatus">Connecting…</span>
+        <button class="btn" id="leaveBtn" style="display:none">Leave Match</button>
+        <button class="btn" id="requeueBtn" style="display:none">Find New Opponent</button>
         <span class="pill">Rule: 1 hour per 15° longitude (4 min/°)</span>
+        <span class="pill">Game UTC: <b id="utcClock">12:00 AM</b></span>
+        <span class="pill">Map: <b>Game Map.PNG</b></span>
       </div>
       <div class="board">
         <canvas id="board" width="1300" height="780" aria-label="game board"></canvas>
@@ -58,103 +62,75 @@
     <!-- CONTROLS -->
     <aside class="side">
       <div class="row">
-        <button class="btn primary" id="rollBtn">Roll Dice</button>
+        <button class="btn primary" id="rollBtn" disabled>Roll Dice</button>
         <div class="die green" id="dieGreen">–</div>
         <div class="die red" id="dieRed">–</div>
         <span class="pill" id="netPill">Net: 0h (0°)</span>
       </div>
 
-      <div class="row">
-        <button class="btn" id="addPlayerBtn">Add Player</button>
-        <button class="btn" id="removePlayerBtn">Remove Last</button>
-        <span class="small">All players start at <b>UTC±0</b> (Greenwich, 0°). Max 4 players.</span>
-      </div>
-
       <!-- Time Quiz -->
-      <div class="row" id="timeQuizRow">
-        <span class="pill">Game UTC: <b id="utcClock">12:00 AM</b></span>
+      <div class="row">
         <select id="timeSelect" class="select" disabled>
           <option value="">— Select local time —</option>
         </select>
         <button class="btn" id="checkTimeBtn" disabled>Check Time</button>
+        <span class="hint">Pick the correct local time for the highlighted zone.</span>
       </div>
 
       <div class="players" id="players"></div>
-
-      <div class="legend">
-        <p><b>How movement works</b></p>
-        <ul>
-          <li>Green die = + (east). Red die = – (west).</li>
-          <li><b>Net hours</b> = green − red. Convert to degrees: <b>×15°</b>.</li>
-          <li>After rolling, first choose the <b>local time</b> at your destination, then click the <b>highlighted band</b> to move.</li>
-          <li><b>Win:</b> First player to <u>cross ±180°</u> (International Date Line) from either direction.</li>
-        </ul>
-      </div>
 
       <div class="log" id="log"></div>
     </aside>
   </div>
 
-  <script>
-    // ====== Constants ======
-    const BASE_UTC_HOUR = 0; // 12:00 AM UTC
+  <!-- Firebase config (you add your project keys in mp/firebase-config.js) -->
+  <script type="module">
+    import { firebaseConfig } from './firebase-config.js';
+    import {
+      initializeApp
+    } from 'https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js';
+    import {
+      getDatabase, ref, set, get, update, push, remove, onValue, runTransaction,
+      onDisconnect, serverTimestamp, child
+    } from 'https://www.gstatic.com/firebasejs/10.12.3/firebase-database.js';
+    import {
+      getAuth, signInAnonymously, onAuthStateChanged
+    } from 'https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js';
+
+    // ================== Firebase boot ==================
+    const app = initializeApp(firebaseConfig);
+    const db  = getDatabase(app);
+    const auth = getAuth(app);
+
+    // ================== UI refs ==================
     const canvas = document.getElementById('board');
     const ctx = canvas.getContext('2d');
+    const mmStatus = document.getElementById('mmStatus');
+    const leaveBtn = document.getElementById('leaveBtn');
+    const requeueBtn = document.getElementById('requeueBtn');
+    const rollBtn = document.getElementById('rollBtn');
+    const dieG = document.getElementById('dieGreen');
+    const dieR = document.getElementById('dieRed');
+    const netPill = document.getElementById('netPill');
+    const playersDiv = document.getElementById('players');
+    const logDiv = document.getElementById('log');
+    const timeSel = document.getElementById('timeSelect');
+    const checkTimeBtn = document.getElementById('checkTimeBtn');
+    const utcClock = document.getElementById('utcClock');
 
-    const BG_CANDIDATES = [
-      'Game Map.PNG',
-      'Game Map.png',
-      'img/Game Map.PNG',
-      'img/Game Map.png'
-    ];
+    // ================== Constants ==================
+    const BASE_UTC_HOUR = 0; // 12:00 AM UTC
+    utcClock.textContent = hourLabel(BASE_UTC_HOUR);
+    const COLORS = ['#22c55e','#60a5fa']; // you + opponent
+    const BG_CANDIDATES = ['Game Map.PNG','Game Map.png','../Game Map.PNG','../Game Map.png','img/Game Map.PNG','img/Game Map.png'];
 
-    const img = new Image();
-    img.decoding = 'async';
-    img.loading = 'eager';
-    let bgLoaded = false;
+    // ================== Local session state ==================
+    let uid = null;
+    let gameId = null;        // current game id (if in a match)
+    let oppUid = null;
+    let meColor = COLORS[0], oppColor = COLORS[1];
 
-    function tryLoadBackground(candidates){
-      if(!candidates.length){
-        bgLoaded = false;
-        drawBoard();
-        console.warn('Background map not found. Showing placeholder.');
-        return;
-      }
-      const src = candidates[0];
-      img.onload = () => { bgLoaded = true; drawBoard(); };
-      img.onerror = () => { tryLoadBackground(candidates.slice(1)); };
-      img.src = encodeURI(src);
-    }
-
-    // ====== Helpers ======
-    function mod(n,m){ return ((n % m) + m) % m; }
-    function hourLabel(h24){
-      const h = mod(h24,24);
-      const am = h < 12;
-      const h12 = (h % 12) === 0 ? 12 : (h % 12);
-      return `${h12}:00 ${am ? 'AM' : 'PM'}`;
-    }
-    function populateTimeOptions(){
-      const sel = document.getElementById('timeSelect');
-      sel.innerHTML = `<option value="">— Select local time —</option>`;
-      for(let h=0; h<24; h++){
-        const label = hourLabel(h);
-        const opt = document.createElement('option');
-        opt.value = label;
-        opt.textContent = label;
-        sel.appendChild(opt);
-      }
-    }
-
-    function lonToX(lon){
-      const clamped = Math.max(-180, Math.min(180, lon));
-      return ((clamped + 180) / 360) * canvas.width;
-    }
-    function xToLon(x){
-      const frac = x / canvas.width;
-      return frac * 360 - 180;
-    }
-    // Visual-only shift so tokens sit BETWEEN the 15° lines
+    // drawn tokens between lines (visual only)
     function betweenLinesLon(lon){
       if (lon <= -180) return -172.5;
       if (lon >=  180) return  172.5;
@@ -163,360 +139,499 @@
       if (adj < -180) adj = -172.5;
       return adj;
     }
-    // Snap a longitude to the starting edge of its 15° band (…,-180,-165,-150,…,165)
-    function bandStartFromLon(lon){
-      const k = Math.floor((lon + 180) / 15); // 0..24
-      return (k * 15) - 180;                 // -180..+180 in 15° steps (last band starts at 165)
+    function lonToX(lon){
+      const clamped = Math.max(-180, Math.min(180, lon));
+      return ((clamped + 180) / 360) * canvas.width;
     }
+    function xToLon(x){
+      const frac = x / canvas.width;
+      return frac * 360 - 180;
+    }
+    function bandStartFromLon(lon){
+      const k = Math.floor((lon + 180) / 15);
+      return (k * 15) - 180;
+    }
+    function mod(n,m){ return ((n % m) + m) % m; }
+    function hourLabel(h24){
+      const h = mod(h24,24);
+      const am = h < 12;
+      const h12 = (h % 12) === 0 ? 12 : (h % 12);
+      return `${h12}:00 ${am ? 'AM' : 'PM'}`;
+    }
+    function formatUTC(h){
+      const s = h >= 0 ? '+' : '−';
+      return `UTC${h===0 ? '±0' : s + Math.abs(h).toFixed(0)}`;
+    }
+    function populateTimeOptions(){
+      timeSel.innerHTML = `<option value="">— Select local time —</option>`;
+      for(let h=0; h<24; h++){
+        const label = hourLabel(h);
+        const opt = document.createElement('option');
+        opt.value = label; opt.textContent = label;
+        timeSel.appendChild(opt);
+      }
+    }
+    populateTimeOptions();
 
-    // ====== Placeholder when map not found ======
+    // =============== Map / drawing ===============
+    const img = new Image();
+    img.decoding = 'async';
+    img.loading = 'eager';
+    let bgLoaded = false;
+    function tryLoadBackground(list){
+      if(!list.length){ bgLoaded=false; drawBoard(null); return; }
+      const src = list[0];
+      img.onload = ()=>{ bgLoaded=true; drawBoard(null); };
+      img.onerror = ()=> tryLoadBackground(list.slice(1));
+      img.src = encodeURI(src);
+    }
+    tryLoadBackground(BG_CANDIDATES.slice());
+
     function drawPlaceholder(){
       ctx.fillStyle = '#0a142a';
       ctx.fillRect(0,0,canvas.width,canvas.height);
-
-      // light vertical grid
-      ctx.strokeStyle = '#203253';
-      ctx.lineWidth = 1;
-      for(let i=0;i<=24;i++){
-        const x = (i/24)*canvas.width;
-        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
-      }
-
-      // prime meridian
+      ctx.strokeStyle = '#203253'; ctx.lineWidth = 1;
+      for(let i=0;i<=24;i++){ const x=(i/24)*canvas.width; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
       const mid = canvas.width/2;
-      ctx.strokeStyle = '#5aa9ff';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(mid,0); ctx.lineTo(mid,canvas.height); ctx.stroke();
-
-      // IDL dashed at both edges
-      ctx.setLineDash([8,6]);
-      ctx.strokeStyle = '#facc15';
+      ctx.setLineDash([8,6]); ctx.strokeStyle='#facc15';
       ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,canvas.height); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(canvas.width,0); ctx.lineTo(canvas.width,canvas.height); ctx.stroke();
       ctx.setLineDash([]);
-
-      // labels
-      ctx.fillStyle = '#cfe0ff';
-      ctx.font = '14px system-ui, Segoe UI, Roboto, Arial';
+      ctx.fillStyle = '#cfe0ff'; ctx.font = '14px system-ui, Segoe UI, Roboto, Arial';
       ctx.fillText('Prime Meridian (0° / UTC±0)', mid+8, 22);
       ctx.fillText('International Date Line (±180°)', 10, 22);
       ctx.fillText('International Date Line (±180°)', canvas.width-260, 22);
     }
 
-    // ====== Game State ======
-    const COLORS = ['#22c55e','#60a5fa','#f97316','#e879f9'];
-    let players = [];
-    let turn = 0;
-
-    // Pending move (after roll)
-    let awaitingTime = false;  // waiting for player to answer time quiz
-    let awaitingClick = false; // waiting for player to click highlighted band
-    let pending = null; // { playerId, netHours, netDeg, beforeLon, destLonRaw, destLonClamped, destBandStart, destOffset, correctTime }
-
-    // ====== UI Render ======
-    function drawBoard(){
-      if(bgLoaded){
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        ctx.drawImage(img,0,0,canvas.width,canvas.height);
-      }else{
-        drawPlaceholder();
-      }
-      drawGuidesAndTokens();
-      if (pending){
-        highlightDestinationBand(pending.destBandStart, awaitingClick);
-      }
-    }
-
-    function drawGuidesAndTokens(){
+    function drawBoard(state){
+      if(bgLoaded){ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height); }
+      else { drawPlaceholder(); }
+      // Guides
       const mid = canvas.width/2;
-      ctx.save();
-      ctx.globalAlpha = 0.9;
-
-      // Prime meridian
-      ctx.strokeStyle = '#60a5fa';
-      ctx.lineWidth = 2;
+      ctx.save(); ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(mid,0); ctx.lineTo(mid,canvas.height); ctx.stroke();
-
-      // IDL (both edges)
-      ctx.setLineDash([8,6]);
-      ctx.strokeStyle = '#facc15';
+      ctx.setLineDash([8,6]); ctx.strokeStyle = '#facc15';
       ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,canvas.height); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(canvas.width,0); ctx.lineTo(canvas.width,canvas.height); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
+      ctx.setLineDash([]); ctx.restore();
 
-      // Longitude ticks & labels every 15°
-      ctx.strokeStyle = 'rgba(255,255,255,.25)';
-      ctx.fillStyle = 'rgba(255,255,255,.85)';
-      ctx.lineWidth = 1;
-      ctx.font = '12px system-ui, Segoe UI, Roboto, Arial';
-      for(let h=-12; h<=12; h++){
-        const lon = h*15; const x = lonToX(lon);
-        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,12); ctx.stroke();
-        ctx.fillText(`${lon}°`, x-14, 28);
+      ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.fillStyle = 'rgba(255,255,255,.85)';
+      ctx.lineWidth = 1; ctx.font = '12px system-ui, Segoe UI, Roboto, Arial';
+      for(let h=-12; h<=12; h++){ const lon=h*15; const x=lonToX(lon);
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,12); ctx.stroke(); ctx.fillText(`${lon}°`, x-14, 28); }
+
+      if(!state) return;
+
+      // highlight pending destination
+      if(state.pending){
+        const start = state.pending.destBandStart;
+        const startX = lonToX(start);
+        const endX = lonToX(Math.min(start+15,180));
+        const ready = state.awaitingClick === true;
+        ctx.save();
+        ctx.fillStyle = ready ? 'rgba(34,197,94,0.22)' : 'rgba(99,102,241,0.22)';
+        ctx.fillRect(startX,0,Math.max(2,endX-startX),canvas.height);
+        ctx.strokeStyle = ready ? 'rgba(34,197,94,0.9)' : 'rgba(99,102,241,0.9)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(startX+1,1,Math.max(1,endX-startX-2),canvas.height-2);
+        ctx.fillStyle = '#e0e7ff'; ctx.font='bold 14px system-ui, Segoe UI, Roboto, Arial';
+        ctx.fillText(ready?'Correct! Click here to move':'Answer time quiz first', startX+8, 52);
+        ctx.restore();
       }
 
-      players.forEach(p=>drawToken(p));
+      // tokens
+      const you = state.positions[uid], them = state.positions[oppUid];
+      if(you) drawToken(you.lon, you.offset, meColor, 'You', 0);
+      if(them) drawToken(them.lon, them.offset, oppColor, 'Opponent', 1);
     }
 
-    function drawToken(p){
-      const drawLon = betweenLinesLon(p.lon);
-      const x = lonToX(drawLon);
-      const y = canvas.height*0.75 - p.index*26;
-
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,.6)';
-      ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
-      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI*2); ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = '#0b1220'; ctx.stroke();
-      ctx.restore();
-
-      const zone = formatUTC(p.offset);
-      ctx.fillStyle = '#e5edff';
-      ctx.font = '12px system-ui, Segoe UI, Roboto, Arial';
-      const label = `${p.name}: ${p.lon.toFixed(0)}°  (${zone})`;
+    function drawToken(lon, offset, color, name, idx){
+      const x = lonToX(betweenLinesLon(lon));
+      const y = canvas.height*0.75 - idx*26;
+      ctx.save(); ctx.shadowColor='rgba(0,0,0,.6)'; ctx.shadowBlur=8; ctx.shadowOffsetY=2;
+      ctx.fillStyle=color; ctx.beginPath(); ctx.arc(x,y,10,0,Math.PI*2); ctx.fill();
+      ctx.lineWidth=2; ctx.strokeStyle='#0b1220'; ctx.stroke(); ctx.restore();
+      ctx.fillStyle='#e5edff'; ctx.font='12px system-ui, Segoe UI, Roboto, Arial';
+      const label = `${name}: ${lon.toFixed(0)}° (${formatUTC(offset)})`;
       ctx.fillText(label, Math.min(Math.max(6, x-50), canvas.width-220), y-14);
     }
 
-    function highlightDestinationBand(bandStart, readyToMove){
-      // band spans [bandStart, bandStart+15] (cap on right edge)
-      const startX = lonToX(bandStart);
-      const endLon = Math.min(bandStart + 15, 180);
-      const endX = lonToX(endLon);
-
-      ctx.save();
-      ctx.fillStyle = readyToMove ? 'rgba(34,197,94,0.22)' : 'rgba(99,102,241,0.22)';
-      ctx.fillRect(startX, 0, Math.max(2, endX - startX), canvas.height);
-
-      // outline
-      ctx.strokeStyle = readyToMove ? 'rgba(34,197,94,0.9)' : 'rgba(99,102,241,0.9)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(startX+1, 1, Math.max(1, endX - startX - 2), canvas.height-2);
-
-      // helper text
-      ctx.fillStyle = '#e0e7ff';
-      ctx.font = 'bold 14px system-ui, Segoe UI, Roboto, Arial';
-      ctx.fillText(readyToMove ? 'Correct! Click here to move' : 'Answer time quiz first', startX + 8, 52);
-      ctx.restore();
+    function log(msg){
+      const atBottom = Math.abs(logDiv.scrollHeight - logDiv.scrollTop - logDiv.clientHeight) < 4;
+      logDiv.insertAdjacentHTML('afterbegin', `<div>${msg}</div>`);
+      if(atBottom) logDiv.scrollTop = 0;
     }
 
-    function formatUTC(h){
-      const s = h >= 0 ? '+' : '−';
-      return `UTC${h===0 ? '±0' : s + Math.abs(h).toFixed(0)}`;
+    // =============== Auth / presence / matchmaking ===============
+    let userGameRef = null, gameStateRef = null, gameMetaRef = null, gameUnsub = null;
+    let queueKey = null; // my entry key in queue
+
+    onAuthStateChanged(auth, async (user)=>{
+      if(!user){
+        await signInAnonymously(auth);
+        return;
+      }
+      uid = user.uid;
+      // Presence
+      const presRef = ref(db, `/presence/${uid}`);
+      await set(presRef, true);
+      onDisconnect(presRef).remove();
+
+      // Watch my current game id
+      userGameRef = ref(db, `/users/${uid}`);
+      onValue(userGameRef, snap=>{
+        const data = snap.val() || {};
+        const newGameId = data.gameId || null;
+        if(newGameId !== gameId){
+          if(gameUnsub) gameUnsub(); gameUnsub = null;
+          gameId = newGameId;
+          if(gameId){
+            mmStatus.textContent = 'Matched — game starting!';
+            leaveBtn.style.display = '';
+            requeueBtn.style.display = 'none';
+            attachGame(gameId);
+          }else{
+            // not in a match → enter matchmaking
+            leaveBtn.style.display = 'none';
+            requeueBtn.style.display = 'none';
+            detachGame();
+            enterQueue(false); // normal queue when landing
+          }
+        }
+      });
+    });
+
+    async function enterQueue(priority){
+      mmStatus.textContent = 'Pairing…';
+      // write my queue entry
+      const qPath = priority? '/queue/priority' : '/queue/normal';
+      const entryRef = push(ref(db, qPath), { uid, ts: serverTimestamp() });
+      queueKey = entryRef.key;
+      onDisconnect(entryRef).remove();
+
+      // also mark my status
+      await update(ref(db, `/users/${uid}`), { status:'queued', queuePath: `${qPath}/${queueKey}`, gameId: null });
+
+      // try to become pairing worker
+      tryPairingWorker();
     }
 
-    function renderPlayers(){
-      const wrap = document.getElementById('players');
-      wrap.innerHTML = '';
-      players.forEach((p,i)=>{
-        const div = document.createElement('div');
-        div.className = 'card';
-        const zone = formatUTC(p.offset);
-        div.innerHTML = `
-          <h3><span style="display:inline-block;width:10px;height:10px;background:${p.color};border-radius:50%;margin-right:6px"></span>${p.name} ${i===turn?'<span class="pill">Your turn</span>':''}</h3>
-          <div class="grid2 small">
-            <div><b>Longitude:</b> ${p.lon.toFixed(1)}°</div>
-            <div><b>Time Zone:</b> ${zone}</div>
-            <div><b>Status:</b> ${Math.abs(p.lon)>=180?'<span class="win">Crossed IDL</span>':'Racing…'}</div>
-            <div><b>Target:</b> ±180°</div>
-          </div>`;
-        wrap.appendChild(div);
+    async function leaveQueue(){
+      const userSnap = await get(ref(db, `/users/${uid}`));
+      const u = userSnap.val() || {};
+      if(u.queuePath){
+        await remove(ref(db, `/${u.queuePath}`));
+      }
+      await update(ref(db, `/users/${uid}`), { status:'idle', queuePath:null });
+      mmStatus.textContent = 'Waiting (not queued)';
+    }
+
+    function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+
+    async function tryPairingWorker(){
+      const lockRef = ref(db, '/pairing/lock');
+      const result = await runTransaction(lockRef, cur=>{
+        const now = Date.now();
+        if(!cur || !cur.until || cur.until < now) return { owner: uid, until: now + 4000 };
+        return cur;
+      }, {applyLocally:false});
+      const gotLock = result.committed && result.snapshot.val() && result.snapshot.val().owner === uid;
+      if(!gotLock) return; // another worker is pairing right now
+      try {
+        await performPairingRound();
+      } finally {
+        await set(lockRef, null);
+      }
+    }
+
+    async function performPairingRound(){
+      const qSnap = await get(ref(db, '/queue'));
+      const q = qSnap.val() || {};
+      const priority = Object.entries(q.priority || {}).map(([k,v])=>({key:k, ...v}));
+      const normal   = Object.entries(q.normal   || {}).map(([k,v])=>({key:k, ...v}));
+
+      // filter out missing uids
+      const p = priority.filter(e=>e.uid);
+      const n = normal.filter(e=>e.uid);
+
+      let pair = null;
+      // winners first
+      if(p.length >= 2){
+        shuffle(p);
+        pair = [p[0], p[1]];
+      } else if(p.length >= 1 && n.length >= 1){
+        shuffle(n);
+        pair = [p[0], n[0]];
+      } else if(n.length >= 2){
+        shuffle(n);
+        pair = [n[0], n[1]];
+      }
+
+      if(!pair) { mmStatus.textContent = 'Waiting for an opponent…'; return; }
+
+      const a = pair[0], b = pair[1];
+      const gameKey = push(ref(db, '/games')).key;
+      const players = shuffle([a.uid,b.uid]); // randomize who starts
+      const starter = players[0], follower = players[1];
+
+      const gameObj = {
+        createdAt: serverTimestamp(),
+        status: 'playing',
+        winnerUid: null,
+        players: { [starter]: { color: COLORS[0] }, [follower]: { color: COLORS[1] } },
+        state: {
+          turnUid: starter,
+          dice: { g:null, r:null, netHours:0, netDeg:0 },
+          awaitingTime: false,
+          awaitingClick: false,
+          pending: null,
+          positions: {
+            [starter]: { lon:0, offset:0 },
+            [follower]: { lon:0, offset:0 }
+          },
+          log: []
+        }
+      };
+
+      // create game and assign to users atomically-ish
+      const updates = {};
+      updates[`/games/${gameKey}`] = gameObj;
+      updates[`/users/${a.uid}/gameId`] = gameKey;
+      updates[`/users/${b.uid}/gameId`] = gameKey;
+      updates[`/users/${a.uid}/status`] = 'playing';
+      updates[`/users/${b.uid}/status`] = 'playing';
+      if(a.key) updates[`/queue/priority/${a.key}`] = null;
+      if(b.key) updates[`/queue/priority/${b.key}`] = null;
+      // if they were in normal:
+      if(a.key && (await get(ref(db, `/queue/normal/${a.key}`))).exists()) updates[`/queue/normal/${a.key}`] = null;
+      if(b.key && (await get(ref(db, `/queue/normal/${b.key}`))).exists()) updates[`/queue/normal/${b.key}`] = null;
+
+      await update(ref(db), updates);
+    }
+
+    // =============== Attach / Detach game listeners ===============
+    function attachGame(id){
+      // meta
+      gameMetaRef = ref(db, `/games/${id}`);
+      gameStateRef = ref(db, `/games/${id}/state`);
+      onValue(gameMetaRef, snap=>{
+        const meta = snap.val();
+        if(!meta) return;
+        const ps = Object.keys(meta.players || {});
+        oppUid = ps.find(p=>p !== uid) || null;
+        meColor  = (meta.players[uid]?.color) || COLORS[0];
+        oppColor = (meta.players[oppUid]?.color) || COLORS[1];
+
+        if(meta.status === 'finished'){
+          // auto requeue with priority for winner, normal for loser
+          const amWinner = meta.winnerUid === uid;
+          mmStatus.innerHTML = amWinner ? 'You won! Re-queuing (priority)…' : 'Game over. Re-queuing…';
+          requeueBtn.style.display = '';
+          leaveBtn.style.display = 'none';
+          // clear my gameId and enqueue accordingly
+          update(ref(db, `/users/${uid}`), { gameId: null, status:'queued' }).then(()=>{
+            enterQueue(amWinner); // winner -> priority queue, loser -> normal
+          });
+        }
+      });
+      gameUnsub = onValue(gameStateRef, snap=>{
+        const state = snap.val();
+        if(!state) return;
+        syncUI(state);
       });
     }
 
-    function log(msg){
-      const el = document.getElementById('log');
-      const atBottom = Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 4;
-      el.insertAdjacentHTML('afterbegin', `<div>${msg}</div>`);
-      if(atBottom) el.scrollTop = 0;
+    function detachGame(){
+      if(gameUnsub) gameUnsub();
+      gameUnsub = null;
+      oppUid = null;
+      rollBtn.disabled = true;
+      timeSel.disabled = true; checkTimeBtn.disabled = true;
+      dieG.textContent = '–'; dieR.textContent = '–'; netPill.textContent = 'Net: 0h (0°)';
+      logDiv.innerHTML = '';
+      drawBoard(null);
     }
 
-    // ====== Players & Turn Flow ======
-    function addPlayer(){
-      if(players.length >= 4) return;
-      const idx = players.length;
-      const id = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
-      const p = { id, index: idx, name: `Player ${idx+1}`, color: COLORS[idx%COLORS.length], lon: 0, offset: 0 };
-      players.push(p);
-      renderPlayers(); drawBoard(); updateAddBtn();
-    }
-    function removePlayer(){
-      players.pop(); players.forEach((p,i)=>p.index=i);
-      if(turn>=players.length) turn = 0;
-      renderPlayers(); drawBoard(); updateAddBtn();
-    }
-    function updateAddBtn(){ document.getElementById('addPlayerBtn').disabled = players.length >= 4; }
+    // =============== Game UI sync ===============
+    function syncUI(state){
+      // controls
+      const myTurn = state.turnUid === uid && !state.awaitingClick && !state.awaitingTime;
+      rollBtn.disabled = !myTurn;
+      // dice/net
+      dieG.textContent = state.dice.g ?? '–';
+      dieR.textContent = state.dice.r ?? '–';
+      const netH = state.dice.netHours ?? 0, netD = state.dice.netDeg ?? 0;
+      netPill.textContent = `Net: ${netH>=0?'+':''}${netH}h (${netD>=0?'+':''}${netD}°)`;
 
+      // time quiz
+      if(state.awaitingTime && state.pending && state.pending.playerId === uid){
+        timeSel.disabled = false; checkTimeBtn.disabled = false;
+      }else{
+        timeSel.disabled = true; checkTimeBtn.disabled = true; timeSel.value = '';
+      }
+
+      // players panel
+      playersDiv.innerHTML = '';
+      const me = state.positions[uid], them = state.positions[oppUid];
+      const turnBadge = (u)=> u===state.turnUid ? '<span class="pill">Your turn</span>' : '';
+      const youCard = `
+        <div class="card">
+          <h3><span style="display:inline-block;width:10px;height:10px;background:${meColor};border-radius:50%;margin-right:6px"></span>You ${turnBadge(uid)}</h3>
+          <div class="grid2 small">
+            <div><b>Longitude:</b> ${me.lon.toFixed(1)}°</div>
+            <div><b>Time Zone:</b> ${formatUTC(me.offset)}</div>
+          </div>
+        </div>`;
+      const oppCard = `
+        <div class="card">
+          <h3><span style="display:inline-block;width:10px;height:10px;background:${oppColor};border-radius:50%;margin-right:6px"></span>Opponent ${turnBadge(oppUid)}</h3>
+          <div class="grid2 small">
+            <div><b>Longitude:</b> ${them.lon.toFixed(1)}°</div>
+            <div><b>Time Zone:</b> ${formatUTC(them.offset)}</div>
+          </div>
+        </div>`;
+      playersDiv.insertAdjacentHTML('beforeend', youCard + oppCard);
+
+      // log
+      if(Array.isArray(state.log)){
+        logDiv.innerHTML = state.log.slice().reverse().map(s=>`<div>${s}</div>`).join('');
+      }
+
+      drawBoard(state);
+    }
+
+    function appendLog(state, msg){
+      const arr = Array.isArray(state.log) ? state.log.slice() : [];
+      arr.push(msg); if(arr.length>120) arr.shift();
+      return arr;
+    }
+
+    // =============== Turn actions ===============
     function rollDie(){ return 1 + Math.floor(Math.random()*6); }
 
-    function startTurn(){
-      if(players.length===0) return alert('Add at least one player.');
-      if(players.some(p=>Math.abs(p.lon)>=180)) return; // game over
-
-      const p = players[turn];
-      const g = rollDie();
-      const r = rollDie();
-      document.getElementById('dieGreen').textContent = g;
-      document.getElementById('dieRed').textContent = r;
-
-      const netHours = g - r;           // + east, - west
-      const netDeg = netHours * 15;     // exact degrees
-      const before = p.lon;
-      const destLonRaw = before + netDeg;
+    async function startTurn(){
+      const sSnap = await get(gameStateRef); const s = sSnap.val();
+      if(!s || s.turnUid !== uid || s.awaitingClick || s.awaitingTime) return;
+      const g = rollDie(), r = rollDie();
+      const netHours = g - r, netDeg = netHours * 15;
+      const me = s.positions[uid];
+      const destLonRaw = me.lon + netDeg;
       const destLonClamped = Math.max(-180, Math.min(180, destLonRaw));
       const destBandStart = destLonClamped === 180 ? 165 : (destLonClamped === -180 ? -180 : bandStartFromLon(destLonClamped));
-      const destOffset = p.offset + netHours;
+      const destOffset = me.offset + netHours;
       const correctTime = hourLabel(mod(BASE_UTC_HOUR + destOffset, 24));
 
-      document.getElementById('netPill').textContent =
-        `Net: ${netHours>=0?'+':''}${netHours}h (${netDeg>=0?'+':''}${netDeg}°)`;
-
-      pending = { playerId: p.id, netHours, netDeg, beforeLon: before, destLonRaw, destLonClamped, destBandStart, destOffset, correctTime };
-      awaitingTime = true;
-      awaitingClick = false;
-      document.getElementById('rollBtn').disabled = true;
-
-      // enable time quiz controls
-      document.getElementById('timeSelect').disabled = false;
-      document.getElementById('checkTimeBtn').disabled = false;
-      document.getElementById('timeSelect').value = '';
-
-      log(`<b>${p.name}</b> rolled <span style="color:var(--green)">${g}</span> / <span style="color:var(--red)">${r}</span>. Choose the local time in <b>${formatUTC(destOffset)}</b>, then click the highlighted band to move ${netDeg>=0?'east':'west'} ${Math.abs(netDeg)}°.`);
-      drawBoard();
-      renderPlayers();
+      const logMsg = `<b>You</b> rolled <span style="color:var(--green)">${g}</span> / <span style="color:var(--red)">${r}</span>. Choose the local time in <b>${formatUTC(destOffset)}</b>.`;
+      const next = {
+        ...s,
+        dice: { g, r, netHours, netDeg },
+        awaitingTime: true,
+        awaitingClick: false,
+        pending: { playerId: uid, netHours, netDeg, beforeLon: me.lon, destLonRaw, destLonClamped, destBandStart, destOffset, correctTime },
+        log: appendLog(s, logMsg)
+      };
+      await set(gameStateRef, next);
     }
 
-    function finishMove(){
-      const p = players[turn];
-      const { netHours, netDeg, beforeLon, destLonRaw, destLonClamped } = pending;
+    async function checkTime(){
+      const picked = timeSel.value;
+      const sSnap = await get(gameStateRef); const s = sSnap.val();
+      if(!s || !s.pending || s.pending.playerId !== uid || !s.awaitingTime) return;
+      if(!picked){ log('<span class="warn">Pick a time</span> first.'); return; }
 
-      // apply move
-      p.lon = destLonClamped;
-      p.offset += netHours;
-
-      const crossed = (Math.abs(beforeLon) < 180 && Math.abs(destLonRaw) >= 180);
-
-      drawBoard(); renderPlayers();
-
-      const dir = netHours===0? 'stays put' : (netHours>0? 'moves east':'moves west');
-      log(`<b>${p.name}</b> ${dir} ${Math.abs(netDeg)}° to ${p.lon.toFixed(1)}° (${formatUTC(p.offset)}).`);
-
-      // clear pending
-      awaitingTime = false;
-      awaitingClick = false;
-      pending = null;
-      document.getElementById('rollBtn').disabled = false;
-
-      // disable time quiz controls
-      document.getElementById('timeSelect').disabled = true;
-      document.getElementById('checkTimeBtn').disabled = true;
-      document.getElementById('timeSelect').value = '';
-
-      if(crossed){
-        log(`<span class="win">${p.name} crossed the International Date Line and WINS!</span>`);
-        alert(`${p.name} crossed the International Date Line and WINS!`);
-        return;
-      }
-
-      // next player's turn
-      turn = (turn + 1) % players.length;
-      renderPlayers();
-    }
-
-    function forfeitMoveWithAnswer(){
-      const p = players[turn];
-      const { correctTime, destOffset } = pending;
-
-      log(`<span style="color:#fca5a5">Incorrect.</span> The correct local time in <b>${formatUTC(destOffset)}</b> is <b>${correctTime}</b>. Move is forfeited.`);
-
-      // reset state, advance turn
-      awaitingTime = false;
-      awaitingClick = false;
-      pending = null;
-
-      // disable time quiz controls
-      document.getElementById('timeSelect').disabled = true;
-      document.getElementById('checkTimeBtn').disabled = true;
-      document.getElementById('timeSelect').value = '';
-
-      document.getElementById('rollBtn').disabled = false;
-      drawBoard(); renderPlayers();
-
-      turn = (turn + 1) % players.length;
-      renderPlayers();
-    }
-
-    function applyPendingIfClickValid(clickLon){
-      if(!awaitingClick || !pending) return false;
-      const bandClick = bandStartFromLon(clickLon);
-      const validBand = pending.destBandStart;
-      return bandClick === validBand;
-    }
-
-    // ====== Events ======
-    document.getElementById('rollBtn').addEventListener('click', startTurn);
-    document.getElementById('addPlayerBtn').addEventListener('click', addPlayer);
-    document.getElementById('removePlayerBtn').addEventListener('click', removePlayer);
-    document.getElementById('resetBtn').addEventListener('click', ()=>{
-      players.forEach(p=>{ p.lon=0; p.offset=0; });
-      turn = 0;
-      awaitingTime = false; awaitingClick = false; pending = null;
-      document.getElementById('rollBtn').disabled = false;
-
-      // reset time quiz controls
-      document.getElementById('timeSelect').disabled = true;
-      document.getElementById('checkTimeBtn').disabled = true;
-      document.getElementById('timeSelect').value = '';
-
-      drawBoard(); renderPlayers(); log('Tokens reset to 0° / UTC±0.');
-    });
-
-    // Time quiz check
-    document.getElementById('checkTimeBtn').addEventListener('click', ()=>{
-      if(!awaitingTime || !pending) return;
-      const picked = document.getElementById('timeSelect').value;
-      if(!picked){
-        log(`<span style="color:#fca5a5">Pick a time</span> from the dropdown first.`);
-        return;
-      }
-      if(picked === pending.correctTime){
-        awaitingTime = false;
-        awaitingClick = true;
-        // lock the dropdown while awaiting the click
-        document.getElementById('timeSelect').disabled = true;
-        document.getElementById('checkTimeBtn').disabled = true;
-        log(`<span style="color:#22c55e">Correct.</span> Now click the highlighted band to move.`);
-        drawBoard();
+      if(picked === s.pending.correctTime){
+        const logMsg = `<span class="win">Correct.</span> Click the highlighted band to move.`;
+        await update(gameStateRef, {
+          awaitingTime: false,
+          awaitingClick: true,
+          log: appendLog(s, logMsg)
+        });
       }else{
-        forfeitMoveWithAnswer();
+        // forfeit move, switch turn
+        const nextTurn = oppUid;
+        const logMsg = `<span class="warn">Incorrect.</span> Correct local time is <b>${s.pending.correctTime}</b>. Move forfeited.`;
+        await set(gameStateRef, {
+          ...s,
+          turnUid: nextTurn,
+          awaitingTime: false,
+          awaitingClick: false,
+          pending: null,
+          log: appendLog(s, logMsg)
+        });
       }
-    });
+    }
 
-    // Click-to-move on the canvas (only after correct answer)
-    canvas.addEventListener('click', (ev)=>{
+    function applyPendingIfClickValid(s, clickLon){
+      if(!s.awaitingClick || !s.pending || s.pending.playerId !== uid) return false;
+      const bandClick = bandStartFromLon(clickLon);
+      return bandClick === s.pending.destBandStart;
+    }
+
+    async function finishMoveByClick(xCanvas){
       const rect = canvas.getBoundingClientRect();
-      const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
+      const x = (xCanvas - rect.left) * (canvas.width / rect.width);
       const clickedLon = xToLon(x);
 
-      if(!awaitingClick || !pending){
-        return; // ignore clicks outside selection phase
+      const sSnap = await get(gameStateRef); const s = sSnap.val();
+      if(!s || !s.pending || s.pending.playerId !== uid || !s.awaitingClick) return;
+
+      if(!applyPendingIfClickValid(s, clickedLon)){
+        log(`<span class="warn">Invalid:</span> click the highlighted band to confirm your move.`);
+        return;
       }
-      if(applyPendingIfClickValid(clickedLon)){
-        finishMove();
-      }else{
-        log(`<span style="color:#fca5a5">Invalid:</span> click the highlighted band to confirm your move.`);
+
+      const me = s.positions[uid];
+      const them = s.positions[oppUid];
+      const { netHours, netDeg, beforeLon, destLonRaw, destLonClamped } = s.pending;
+      const crossed = (Math.abs(beforeLon) < 180 && Math.abs(destLonRaw) >= 180);
+
+      const newMe = { lon: destLonClamped, offset: me.offset + netHours };
+      let nextState = {
+        ...s,
+        positions: { [uid]: newMe, [oppUid]: them },
+        awaitingTime: false,
+        awaitingClick: false,
+        pending: null,
+        dice: s.dice,
+        log: appendLog(s, `<b>You</b> ${netHours===0?'stays put':(netHours>0?'moves east':'moves west')} ${Math.abs(netDeg)}° to ${newMe.lon.toFixed(1)}° (${formatUTC(newMe.offset)}).`)
+      };
+
+      if(crossed){
+        await update(ref(db, `/games/${gameId}`), { status:'finished', winnerUid: uid });
+        return;
+      }
+
+      // pass turn
+      nextState.turnUid = oppUid;
+      await set(gameStateRef, nextState);
+    }
+
+    // =============== Buttons / Events ===============
+    rollBtn.addEventListener('click', startTurn);
+    checkTimeBtn.addEventListener('click', checkTime);
+    canvas.addEventListener('click', (ev)=>{
+      finishMoveByClick(ev.clientX);
+    });
+
+    leaveBtn.addEventListener('click', async ()=>{
+      // leave current match and requeue as normal
+      if(gameId){
+        await update(ref(db, `/games/${gameId}`), { status:'finished', winnerUid: oppUid || null });
+      } else {
+        await leaveQueue();
       }
     });
 
-    // ====== Boot ======
-    tryLoadBackground(BG_CANDIDATES.slice());
-    document.getElementById('utcClock').textContent = hourLabel(BASE_UTC_HOUR);
-    populateTimeOptions();
-    drawBoard();              // draw placeholder immediately
-    addPlayer(); addPlayer(); // start with 2 players
-    renderPlayers();
-    document.getElementById('rollBtn').disabled = false;
-    updateAddBtn();
+    requeueBtn.addEventListener('click', async ()=>{
+      // If between games, this just ensures we're queued
+      const u = (await get(ref(db, `/users/${uid}`))).val()||{};
+      if(u.status!=='queued'){ await update(ref(db, `/users/${uid}`), { status:'queued' }); enterQueue(false); }
+      requeueBtn.style.display = 'none';
+    });
+
   </script>
 </body>
 </html>
