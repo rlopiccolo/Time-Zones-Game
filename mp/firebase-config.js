@@ -1,7 +1,6 @@
-// /mp/firebase-config.js
 export const firebaseConfig = {
-  apiKey: "AIzaSyAbKb1NkyBxEHdNreEyd48cZEQaSpLuYCs",
-  authDomain: "time-zones-game.firebaseapp.com",
+  apiKey: "…",
+  authDomain: "…",
   databaseURL: "https://time-zones-game-default-rtdb.firebaseio.com",
   projectId: "time-zones-game",
   storageBucket: "time-zones-game.appspot.com",
