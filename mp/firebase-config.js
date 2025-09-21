@@ -1,29 +1,10 @@
-// Replace the placeholders below with your Firebase project’s values.
-// How to get these: Firebase Console → Project settings → "Your apps" → Web app → SDK config.
-// Realtime Database: create a DB, choose a location, and enable Anonymous auth under Authentication → Sign-in method.
-
+// /mp/firebase-config.js
 export const firebaseConfig = {
-  apiKey:        "YOUR_API_KEY",
-  authDomain:    "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL:   "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-  projectId:     "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:         "YOUR_APP_ID"
+  apiKey: "AIzaSyAbKb1NkyBxEHdNreEyd48cZEQaSpLuYCs",
+  authDomain: "time-zones-game.firebaseapp.com",
+  databaseURL: "https://time-zones-game-default-rtdb.firebaseio.com", // <- paste EXACTLY from Console
+  projectId: "time-zones-game",
+  storageBucket: "time-zones-game.appspot.com", // not used by our code; ok if different
+  messagingSenderId: "304047161756",
+  appId: "1:304047161756:web:599c1ed492d02d0592c859"
 };
-
-/*
-Realtime Database Rules (simple classroom setup)
------------------------------------------------
-Use these rules so only signed-in users (anonymous is fine) can read/write
-the small set of paths used by this demo. Paste into Realtime Database → Rules:
-
-{
-  "rules": {
-    ".read": "auth != null",
-    ".write": "auth != null"
-  }
-}
-
-(For stricter control later, we can lock writes to each user's own node.)
-*/
