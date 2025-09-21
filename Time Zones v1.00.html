@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Time Zones & IDL Dice Game</title>
+  <style>
+    :root { --bg:#0b1220; --ink:#f7f7fb; --accent:#59c; --green:#16a34a; --red:#dc2626; --panel:#121a2b; --muted:#8aa0c7; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+    header{padding:14px 16px;border-bottom:1px solid #233357;background:linear-gradient(180deg,#0d1630,#0b1220)}
+    h1{font-size:18px;margin:0}
+    .app{display:grid;grid-template-columns: 1.3fr 1fr; gap:16px; padding:16px;}
+    @media (max-width: 980px){.app{grid-template-columns:1fr}}
+    .boardWrap{background:#061023;border:1px solid #233357;border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+    .toolbar{display:flex;gap:10px;align-items:center;padding:10px;border-bottom:1px solid #233357;background:#0d172d}
+    .btn{appearance:none;border:1px solid #2b3f6b;background:#122041;color:#fff;padding:8px 10px;border-radius:10px;font-weight:600;cursor:pointer}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn.primary{background:var(--accent)}
+    .board{position:relative;flex:1;display:flex;align-items:center;justify-content:center;background:#0a142a}
+    canvas{max-width:100%;height:auto;display:block;image-rendering:auto}
+    .side{background:var(--panel);border:1px solid #233357;border-radius:14px;padding:14px}
+    .row{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+    .pill{padding:6px 10px;border-radius:999px;border:1px solid #2b3f6b;background:#0f1d39;color:#cfe0ff;font-size:12px}
+    .players{display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px;}
+    .card{border:1px solid #233357;border-radius:12px;padding:10px;background:#0f1a33}
+    .card h3{margin:0 0 6px 0;font-size:14px}
+    .small{font-size:12px;color:var(--muted)}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .die{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#fff}
+    .die.green{background:var(--green)}
+    .die.red{background:var(--red)}
+    .log{height:180px;overflow:auto;border:1px solid #233357;border-radius:10px;padding:8px;background:#0b152c;font-size:12px}
+    .legend{margin-top:8px;font-size:12px;color:#cbd5e1}
+    .win{color:#22c55e;font-weight:700}
+    select.select{border:1px solid #2b3f6b;background:#0f1d39;color:#cfe0ff;border-radius:10px;padding:7px 10px}
+    select.select:disabled{opacity:.6}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Time Zones & International Date Line — Dice Race</h1>
+  </header>
+
+  <div class="app">
+    <!-- BOARD -->
+    <section class="boardWrap">
+      <div class="toolbar">
+        <button class="btn" id="resetBtn">Reset Tokens</button>
+        <span class="pill">Using board: <b>Game Map.PNG</b></span>
+        <span class="pill">Rule: 1 hour per 15° longitude (4 min/°)</span>
+      </div>
+      <div class="board">
+        <canvas id="board" width="1300" height="780" aria-label="game board"></canvas>
+      </div>
+    </section>
+
+    <!-- CONTROLS -->
+    <aside class="side">
+      <div class="row">
+        <button class="btn primary" id="rollBtn">Roll Dice</button>
+        <div class="die green" id="dieGreen">–</div>
+        <div class="die red" id="dieRed">–</div>
+        <span class="pill" id="netPill">Net: 0h (0°)</span>
+      </div>
+
+      <div class="row">
+        <button class="btn" id="addPlayerBtn">Add Player</button>
+        <button class="btn" id="removePlayerBtn">Remove Last</button>
+        <span class="small">All players start at <b>UTC±0</b> (Greenwich, 0°). Max 4 players.</span>
+      </div>
+
+      <!-- Time Quiz -->
+      <div class="row" id="timeQuizRow">
+        <span class="pill">Game UTC: <b id="utcClock">12:00 AM</b></span>
+        <select id="timeSelect" class="select" disabled>
+          <option value="">— Select local time —</option>
+        </select>
+        <button class="btn" id="checkTimeBtn" disabled>Check Time</button>
+      </div>
+
+      <div class="players" id="players"></div>
+
+      <div class="legend">
+        <p><b>How movement works</b></p>
+        <ul>
+          <li>Green die = + (east). Red die = – (west).</li>
+          <li><b>Net hours</b> = green − red. Convert to degrees: <b>×15°</b>.</li>
+          <li>After rolling, first choose the <b>local time</b> at your destination, then click the <b>highlighted band</b> to move.</li>
+          <li><b>Win:</b> First player to <u>cross ±180°</u> (International Date Line) from either direction.</li>
+        </ul>
+      </div>
+
+      <div class="log" id="log"></div>
+    </aside>
+  </div>
+
+  <script>
+    // ====== Constants ======
+    const BASE_UTC_HOUR = 0; // 12:00 AM UTC
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+
+    const BG_CANDIDATES = [
+      'Game Map.PNG',
+      'Game Map.png',
+      'img/Game Map.PNG',
+      'img/Game Map.png'
+    ];
+
+    const img = new Image();
+    img.decoding = 'async';
+    img.loading = 'eager';
+    let bgLoaded = false;
+
+    function tryLoadBackground(candidates){
+      if(!candidates.length){
+        bgLoaded = false;
+        drawBoard();
+        console.warn('Background map not found. Showing placeholder.');
+        return;
+      }
+      const src = candidates[0];
+      img.onload = () => { bgLoaded = true; drawBoard(); };
+      img.onerror = () => { tryLoadBackground(candidates.slice(1)); };
+      img.src = encodeURI(src);
+    }
+
+    // ====== Helpers ======
+    function mod(n,m){ return ((n % m) + m) % m; }
+    function hourLabel(h24){
+      const h = mod(h24,24);
+      const am = h < 12;
+      const h12 = (h % 12) === 0 ? 12 : (h % 12);
+      return `${h12}:00 ${am ? 'AM' : 'PM'}`;
+    }
+    function populateTimeOptions(){
+      const sel = document.getElementById('timeSelect');
+      sel.innerHTML = `<option value="">— Select local time —</option>`;
+      for(let h=0; h<24; h++){
+        const label = hourLabel(h);
+        const opt = document.createElement('option');
+        opt.value = label;
+        opt.textContent = label;
+        sel.appendChild(opt);
+      }
+    }
+
+    function lonToX(lon){
+      const clamped = Math.max(-180, Math.min(180, lon));
+      return ((clamped + 180) / 360) * canvas.width;
+    }
+    function xToLon(x){
+      const frac = x / canvas.width;
+      return frac * 360 - 180;
+    }
+    // Visual-only shift so tokens sit BETWEEN the 15° lines
+    function betweenLinesLon(lon){
+      if (lon <= -180) return -172.5;
+      if (lon >=  180) return  172.5;
+      let adj = lon + 7.5;
+      if (adj > 180) adj = 172.5;
+      if (adj < -180) adj = -172.5;
+      return adj;
+    }
+    // Snap a longitude to the starting edge of its 15° band (…,-180,-165,-150,…,165)
+    function bandStartFromLon(lon){
+      const k = Math.floor((lon + 180) / 15); // 0..24
+      return (k * 15) - 180;                 // -180..+180 in 15° steps (last band starts at 165)
+    }
+
+    // ====== Placeholder when map not found ======
+    function drawPlaceholder(){
+      ctx.fillStyle = '#0a142a';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      // light vertical grid
+      ctx.strokeStyle = '#203253';
+      ctx.lineWidth = 1;
+      for(let i=0;i<=24;i++){
+        const x = (i/24)*canvas.width;
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+      }
+
+      // prime meridian
+      const mid = canvas.width/2;
+      ctx.strokeStyle = '#5aa9ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(mid,0); ctx.lineTo(mid,canvas.height); ctx.stroke();
+
+      // IDL dashed at both edges
+      ctx.setLineDash([8,6]);
+      ctx.strokeStyle = '#facc15';
+      ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,canvas.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(canvas.width,0); ctx.lineTo(canvas.width,canvas.height); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // labels
+      ctx.fillStyle = '#cfe0ff';
+      ctx.font = '14px system-ui, Segoe UI, Roboto, Arial';
+      ctx.fillText('Prime Meridian (0° / UTC±0)', mid+8, 22);
+      ctx.fillText('International Date Line (±180°)', 10, 22);
+      ctx.fillText('International Date Line (±180°)', canvas.width-260, 22);
+    }
+
+    // ====== Game State ======
+    const COLORS = ['#22c55e','#60a5fa','#f97316','#e879f9'];
+    let players = [];
+    let turn = 0;
+
+    // Pending move (after roll)
+    let awaitingTime = false;  // waiting for player to answer time quiz
+    let awaitingClick = false; // waiting for player to click highlighted band
+    let pending = null; // { playerId, netHours, netDeg, beforeLon, destLonRaw, destLonClamped, destBandStart, destOffset, correctTime }
+
+    // ====== UI Render ======
+    function drawBoard(){
+      if(bgLoaded){
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      }else{
+        drawPlaceholder();
+      }
+      drawGuidesAndTokens();
+      if (pending){
+        highlightDestinationBand(pending.destBandStart, awaitingClick);
+      }
+    }
+
+    function drawGuidesAndTokens(){
+      const mid = canvas.width/2;
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+
+      // Prime meridian
+      ctx.strokeStyle = '#60a5fa';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(mid,0); ctx.lineTo(mid,canvas.height); ctx.stroke();
+
+      // IDL (both edges)
+      ctx.setLineDash([8,6]);
+      ctx.strokeStyle = '#facc15';
+      ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,canvas.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(canvas.width,0); ctx.lineTo(canvas.width,canvas.height); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Longitude ticks & labels every 15°
+      ctx.strokeStyle = 'rgba(255,255,255,.25)';
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      ctx.lineWidth = 1;
+      ctx.font = '12px system-ui, Segoe UI, Roboto, Arial';
+      for(let h=-12; h<=12; h++){
+        const lon = h*15; const x = lonToX(lon);
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,12); ctx.stroke();
+        ctx.fillText(`${lon}°`, x-14, 28);
+      }
+
+      players.forEach(p=>drawToken(p));
+    }
+
+    function drawToken(p){
+      const drawLon = betweenLinesLon(p.lon);
+      const x = lonToX(drawLon);
+      const y = canvas.height*0.75 - p.index*26;
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,.6)';
+      ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI*2); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#0b1220'; ctx.stroke();
+      ctx.restore();
+
+      const zone = formatUTC(p.offset);
+      ctx.fillStyle = '#e5edff';
+      ctx.font = '12px system-ui, Segoe UI, Roboto, Arial';
+      const label = `${p.name}: ${p.lon.toFixed(0)}°  (${zone})`;
+      ctx.fillText(label, Math.min(Math.max(6, x-50), canvas.width-220), y-14);
+    }
+
+    function highlightDestinationBand(bandStart, readyToMove){
+      // band spans [bandStart, bandStart+15] (cap on right edge)
+      const startX = lonToX(bandStart);
+      const endLon = Math.min(bandStart + 15, 180);
+      const endX = lonToX(endLon);
+
+      ctx.save();
+      ctx.fillStyle = readyToMove ? 'rgba(34,197,94,0.22)' : 'rgba(99,102,241,0.22)';
+      ctx.fillRect(startX, 0, Math.max(2, endX - startX), canvas.height);
+
+      // outline
+      ctx.strokeStyle = readyToMove ? 'rgba(34,197,94,0.9)' : 'rgba(99,102,241,0.9)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(startX+1, 1, Math.max(1, endX - startX - 2), canvas.height-2);
+
+      // helper text
+      ctx.fillStyle = '#e0e7ff';
+      ctx.font = 'bold 14px system-ui, Segoe UI, Roboto, Arial';
+      ctx.fillText(readyToMove ? 'Correct! Click here to move' : 'Answer time quiz first', startX + 8, 52);
+      ctx.restore();
+    }
+
+    function formatUTC(h){
+      const s = h >= 0 ? '+' : '−';
+      return `UTC${h===0 ? '±0' : s + Math.abs(h).toFixed(0)}`;
+    }
+
+    function renderPlayers(){
+      const wrap = document.getElementById('players');
+      wrap.innerHTML = '';
+      players.forEach((p,i)=>{
+        const div = document.createElement('div');
+        div.className = 'card';
+        const zone = formatUTC(p.offset);
+        div.innerHTML = `
+          <h3><span style="display:inline-block;width:10px;height:10px;background:${p.color};border-radius:50%;margin-right:6px"></span>${p.name} ${i===turn?'<span class="pill">Your turn</span>':''}</h3>
+          <div class="grid2 small">
+            <div><b>Longitude:</b> ${p.lon.toFixed(1)}°</div>
+            <div><b>Time Zone:</b> ${zone}</div>
+            <div><b>Status:</b> ${Math.abs(p.lon)>=180?'<span class="win">Crossed IDL</span>':'Racing…'}</div>
+            <div><b>Target:</b> ±180°</div>
+          </div>`;
+        wrap.appendChild(div);
+      });
+    }
+
+    function log(msg){
+      const el = document.getElementById('log');
+      const atBottom = Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 4;
+      el.insertAdjacentHTML('afterbegin', `<div>${msg}</div>`);
+      if(atBottom) el.scrollTop = 0;
+    }
+
+    // ====== Players & Turn Flow ======
+    function addPlayer(){
+      if(players.length >= 4) return;
+      const idx = players.length;
+      const id = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
+      const p = { id, index: idx, name: `Player ${idx+1}`, color: COLORS[idx%COLORS.length], lon: 0, offset: 0 };
+      players.push(p);
+      renderPlayers(); drawBoard(); updateAddBtn();
+    }
+    function removePlayer(){
+      players.pop(); players.forEach((p,i)=>p.index=i);
+      if(turn>=players.length) turn = 0;
+      renderPlayers(); drawBoard(); updateAddBtn();
+    }
+    function updateAddBtn(){ document.getElementById('addPlayerBtn').disabled = players.length >= 4; }
+
+    function rollDie(){ return 1 + Math.floor(Math.random()*6); }
+
+    function startTurn(){
+      if(players.length===0) return alert('Add at least one player.');
+      if(players.some(p=>Math.abs(p.lon)>=180)) return; // game over
+
+      const p = players[turn];
+      const g = rollDie();
+      const r = rollDie();
+      document.getElementById('dieGreen').textContent = g;
+      document.getElementById('dieRed').textContent = r;
+
+      const netHours = g - r;           // + east, - west
+      const netDeg = netHours * 15;     // exact degrees
+      const before = p.lon;
+      const destLonRaw = before + netDeg;
+      const destLonClamped = Math.max(-180, Math.min(180, destLonRaw));
+      const destBandStart = destLonClamped === 180 ? 165 : (destLonClamped === -180 ? -180 : bandStartFromLon(destLonClamped));
+      const destOffset = p.offset + netHours;
+      const correctTime = hourLabel(mod(BASE_UTC_HOUR + destOffset, 24));
+
+      document.getElementById('netPill').textContent =
+        `Net: ${netHours>=0?'+':''}${netHours}h (${netDeg>=0?'+':''}${netDeg}°)`;
+
+      pending = { playerId: p.id, netHours, netDeg, beforeLon: before, destLonRaw, destLonClamped, destBandStart, destOffset, correctTime };
+      awaitingTime = true;
+      awaitingClick = false;
+      document.getElementById('rollBtn').disabled = true;
+
+      // enable time quiz controls
+      document.getElementById('timeSelect').disabled = false;
+      document.getElementById('checkTimeBtn').disabled = false;
+      document.getElementById('timeSelect').value = '';
+
+      log(`<b>${p.name}</b> rolled <span style="color:var(--green)">${g}</span> / <span style="color:var(--red)">${r}</span>. Choose the local time in <b>${formatUTC(destOffset)}</b>, then click the highlighted band to move ${netDeg>=0?'east':'west'} ${Math.abs(netDeg)}°.`);
+      drawBoard();
+      renderPlayers();
+    }
+
+    function finishMove(){
+      const p = players[turn];
+      const { netHours, netDeg, beforeLon, destLonRaw, destLonClamped } = pending;
+
+      // apply move
+      p.lon = destLonClamped;
+      p.offset += netHours;
+
+      const crossed = (Math.abs(beforeLon) < 180 && Math.abs(destLonRaw) >= 180);
+
+      drawBoard(); renderPlayers();
+
+      const dir = netHours===0? 'stays put' : (netHours>0? 'moves east':'moves west');
+      log(`<b>${p.name}</b> ${dir} ${Math.abs(netDeg)}° to ${p.lon.toFixed(1)}° (${formatUTC(p.offset)}).`);
+
+      // clear pending
+      awaitingTime = false;
+      awaitingClick = false;
+      pending = null;
+      document.getElementById('rollBtn').disabled = false;
+
+      // disable time quiz controls
+      document.getElementById('timeSelect').disabled = true;
+      document.getElementById('checkTimeBtn').disabled = true;
+      document.getElementById('timeSelect').value = '';
+
+      if(crossed){
+        log(`<span class="win">${p.name} crossed the International Date Line and WINS!</span>`);
+        alert(`${p.name} crossed the International Date Line and WINS!`);
+        return;
+      }
+
+      // next player's turn
+      turn = (turn + 1) % players.length;
+      renderPlayers();
+    }
+
+    function forfeitMoveWithAnswer(){
+      const p = players[turn];
+      const { correctTime, destOffset } = pending;
+
+      log(`<span style="color:#fca5a5">Incorrect.</span> The correct local time in <b>${formatUTC(destOffset)}</b> is <b>${correctTime}</b>. Move is forfeited.`);
+
+      // reset state, advance turn
+      awaitingTime = false;
+      awaitingClick = false;
+      pending = null;
+
+      // disable time quiz controls
+      document.getElementById('timeSelect').disabled = true;
+      document.getElementById('checkTimeBtn').disabled = true;
+      document.getElementById('timeSelect').value = '';
+
+      document.getElementById('rollBtn').disabled = false;
+      drawBoard(); renderPlayers();
+
+      turn = (turn + 1) % players.length;
+      renderPlayers();
+    }
+
+    function applyPendingIfClickValid(clickLon){
+      if(!awaitingClick || !pending) return false;
+      const bandClick = bandStartFromLon(clickLon);
+      const validBand = pending.destBandStart;
+      return bandClick === validBand;
+    }
+
+    // ====== Events ======
+    document.getElementById('rollBtn').addEventListener('click', startTurn);
+    document.getElementById('addPlayerBtn').addEventListener('click', addPlayer);
+    document.getElementById('removePlayerBtn').addEventListener('click', removePlayer);
+    document.getElementById('resetBtn').addEventListener('click', ()=>{
+      players.forEach(p=>{ p.lon=0; p.offset=0; });
+      turn = 0;
+      awaitingTime = false; awaitingClick = false; pending = null;
+      document.getElementById('rollBtn').disabled = false;
+
+      // reset time quiz controls
+      document.getElementById('timeSelect').disabled = true;
+      document.getElementById('checkTimeBtn').disabled = true;
+      document.getElementById('timeSelect').value = '';
+
+      drawBoard(); renderPlayers(); log('Tokens reset to 0° / UTC±0.');
+    });
+
+    // Time quiz check
+    document.getElementById('checkTimeBtn').addEventListener('click', ()=>{
+      if(!awaitingTime || !pending) return;
+      const picked = document.getElementById('timeSelect').value;
+      if(!picked){
+        log(`<span style="color:#fca5a5">Pick a time</span> from the dropdown first.`);
+        return;
+      }
+      if(picked === pending.correctTime){
+        awaitingTime = false;
+        awaitingClick = true;
+        // lock the dropdown while awaiting the click
+        document.getElementById('timeSelect').disabled = true;
+        document.getElementById('checkTimeBtn').disabled = true;
+        log(`<span style="color:#22c55e">Correct.</span> Now click the highlighted band to move.`);
+        drawBoard();
+      }else{
+        forfeitMoveWithAnswer();
+      }
+    });
+
+    // Click-to-move on the canvas (only after correct answer)
+    canvas.addEventListener('click', (ev)=>{
+      const rect = canvas.getBoundingClientRect();
+      const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
+      const clickedLon = xToLon(x);
+
+      if(!awaitingClick || !pending){
+        return; // ignore clicks outside selection phase
+      }
+      if(applyPendingIfClickValid(clickedLon)){
+        finishMove();
+      }else{
+        log(`<span style="color:#fca5a5">Invalid:</span> click the highlighted band to confirm your move.`);
+      }
+    });
+
+    // ====== Boot ======
+    tryLoadBackground(BG_CANDIDATES.slice());
+    document.getElementById('utcClock').textContent = hourLabel(BASE_UTC_HOUR);
+    populateTimeOptions();
+    drawBoard();              // draw placeholder immediately
+    addPlayer(); addPlayer(); // start with 2 players
+    renderPlayers();
+    document.getElementById('rollBtn').disabled = false;
+    updateAddBtn();
+  </script>
+</body>
+</html>
